@@ -51,6 +51,7 @@ dependencies:
   flutter_qjs: ^0.3.6
   flutter_window_close: ^0.2.2
   font_awesome_flutter: ^10.1.0
+  fraction: ^4.0.1
   get: any
   hive: ^2.1.0
   html: ^0.15.0
@@ -79,6 +80,7 @@ dependencies:
   smooth_page_indicator: ^1.0.0+2
   string_validator: ^0.3.0
   table_sticky_headers: ^2.0.0
+  tabular: ^0.6.3+1
   url_launcher: ^6.0.20
   uuid: ^3.0.5
   worker_manager: ^4.2.5
