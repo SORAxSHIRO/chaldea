@@ -391,7 +391,7 @@ class _MissionInputTabState extends State<MissionInputTab> {
         return;
       }
       final missionsCopy = missions.map((e) => e.copy()).toList();
-      final result = await solver.solve(
+      final result = solver.solve(
         quests: validQuests,
         missions: missionsCopy,
       );

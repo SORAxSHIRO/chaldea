@@ -1,33 +1,40 @@
-import 'package:chaldea/app/tools/glpk_solver.dart';
 import 'package:chaldea/models/models.dart';
+import 'package:chaldea/packages/lp/lp.dart';
 import 'scheme.dart';
 
-class MissionSolver extends BaseLPSolver {
+class MissionSolver {
   // make sure [missions] is a copy
-  Future<Map<int, int>> solve({
+  Map<int, int> solve({
     required List<QuestPhase> quests,
     required List<CustomMission> missions,
-  }) async {
-    final result =
-        await callSolver(convertLP(quests: quests, missions: missions));
-    return result.map((key, value) => MapEntry(key, value.round()));
+  }) {
+    final lp = convertLP(quests: quests, missions: missions);
+    final sol = lp.solve(decimalPlaces: 0);
+    final questNum = sol.x.length;
+    Map<int, int> result = {};
+    for (var i = 0; i < questNum; i++) {
+      if (sol.x[i] != 0) {
+        result.addAll({quests[i].id: sol.x[i].toInt()});
+      }
+    }
+    return result;
   }
 
-  BasicLPParams convertLP({
+  LP convertLP({
     required List<QuestPhase> quests,
     required List<CustomMission> missions,
   }) {
     missions
         .removeWhere((mission) => mission.ids.isEmpty || mission.count <= 0);
 
-    List<List<num>> matA = [];
+    List<List<num>> aMat = [];
     for (final mission in List.of(missions)) {
       final row = <int>[];
       for (final quest in quests) {
         row.add(countMissionTarget(mission, quest));
       }
       if (row.any((e) => e > 0)) {
-        matA.add(row);
+        aMat.add(row);
       } else {
         print(
             'remove invalid mission: ${mission.type}/${mission.count}/${mission.ids}');
@@ -35,12 +42,11 @@ class MissionSolver extends BaseLPSolver {
       }
     }
 
-    return BasicLPParams(
-      colNames: quests.map((e) => e.id).toList(),
-      rowNames: missions.map((e) => e.hashCode).toList(),
-      matA: matA,
+    return LP(
+      aMat: aMat,
       bVec: missions.map((e) => e.count).toList(),
       cVec: quests.map((e) => e.consume).toList(),
+      lpType: LPType.min,
       integer: true,
     );
   }
