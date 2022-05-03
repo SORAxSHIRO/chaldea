@@ -45,30 +45,69 @@ class LP {
       // ... What? the LP is already solved?
     }
 
-    if (integer) {
-      while (!tableau.isSolutionInteger) {
-        final row = tableau.firstFoundNonIntegerXRow;
-        final colNum = row.length;
+    var multipleSol = false;
+    List<LPSol> solutions = [];
+    do {
+      if (integer) {
+        while (!tableau.isSolutionInteger) {
+          final row = tableau.firstFoundNonIntegerXRow;
+          final colNum = row.length;
 
-        List<Fraction> gomorysCut = List.from(
-            row.map((v) => v.toMixedFraction().fractionalPart.negate()));
-        gomorysCut.insert(colNum - 1, Fraction(1));
-        tableau.addConstraint(gomorysCut);
+          List<Fraction> gomorysCut = List.from(
+              row.map((v) => v.toMixedFraction().fractionalPart.negate()));
+          gomorysCut.insert(colNum - 1, Fraction(1));
+          tableau.addConstraint(gomorysCut);
 
-        dualSimplex = DualSimplex(tableau: tableau);
-        tableau = dualSimplex.solve();
+          dualSimplex = DualSimplex(tableau: tableau);
+          tableau = dualSimplex.solve();
+        }
+      }
+
+      solutions.add(LPSol(
+        cVec: cVec,
+        aMat: aMat,
+        bVec: bVec,
+        lpType: lpType,
+        integer: integer,
+        z: tableau.z,
+        x: tableau.x,
+      ));
+
+      if (multipleSol) {
+        multipleSol = false;
+        break;
+      }
+
+      final varNum = cVec.length;
+      for (var i = 0; i < varNum; i++) {
+        if (!tableau.isBasicVar(i) && tableau.matrix.first[i] == Fraction(0)) {
+          // Next solution tableau
+          final row = tableau.matrix.length - 1;
+          final col = i;
+          final pivot = tableau.matrix[row][col];
+
+          if (pivot.toDouble() > 0) {
+            tableau.basicVarIndex[row - 1] = col;
+            tableau.rowByScalar(row, pivot.inverse());
+
+            // Break for
+            multipleSol = true;
+            i = varNum;
+          }
+        }
+      }
+    } while (multipleSol);
+
+    var bestSol = solutions.first;
+    if (solutions.length > 1) {
+      final bestSolTime = bestSol.x.reduce((t, c) => t + c);
+      final altSolTime = solutions.last.x.reduce((t, c) => t + c);
+      if (altSolTime < bestSolTime) {
+        bestSol = solutions.last;
       }
     }
 
-    return LPSol(
-      cVec: cVec,
-      aMat: aMat,
-      bVec: bVec,
-      lpType: lpType,
-      integer: integer,
-      z: tableau.z,
-      x: tableau.x,
-    );
+    return bestSol;
   }
 }
 
@@ -431,18 +470,18 @@ class DualSimplex {
 
   int inputVarCol(int inputVarRow) {
     final colNum = tableau.matrix[inputVarRow].length;
-    var outputRel = double.infinity;
-    var outputVarRow = 0;
+    var inputRel = double.infinity;
+    var inputVarCol = 0;
     for (var i = 0; i < colNum - 1; i++) {
       if (tableau.matrix[inputVarRow][i].toDouble() < 0) {
         final rel = tableau.matrix[0][i] / tableau.matrix[inputVarRow][i];
-        if (rel.toDouble().abs() < outputRel) {
-          outputRel = rel.toDouble().abs();
-          outputVarRow = i;
+        if (rel.toDouble().abs() < inputRel) {
+          inputRel = rel.toDouble().abs();
+          inputVarCol = i;
         }
       }
     }
 
-    return outputVarRow;
+    return inputVarCol;
   }
 }

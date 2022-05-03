@@ -193,4 +193,27 @@ void main() {
     final lp2Sol = lp2.solve();
     expect([lp2Sol.z, lp2Sol.x], [expectedLp2Sol.z, expectedLp2Sol.x]);
   });
+
+  test("LP best sol", () {
+    final lp1 = LP(
+      cVec: [3, 4, 4],
+      aMat: [
+        [3, 3, 4],
+      ],
+      bVec: [30],
+      lpType: LPType.min,
+      integer: true,
+    );
+    final expectedLp1Sol = LPSol(
+      cVec: lp1.cVec,
+      aMat: lp1.aMat,
+      bVec: lp1.bVec,
+      lpType: lp1.lpType,
+      integer: lp1.integer,
+      z: 30,
+      x: [2, 0, 6],
+    );
+    final lp1Sol = lp1.solve();
+    expect([lp1Sol.z, lp1Sol.x], [expectedLp1Sol.z, expectedLp1Sol.x]);
+  });
 }
