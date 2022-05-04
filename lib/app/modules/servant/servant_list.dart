@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import 'package:auto_size_text/auto_size_text.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:chaldea/app/app.dart';
 import 'package:chaldea/app/modules/common/builders.dart';
@@ -243,7 +244,7 @@ class ServantListPageState extends State<ServantListPage>
                   },
                 ),
                 PopupMenuItem(
-                  child: const Text('Show Full Screen'),
+                  child: Text(S.current.show_fullscreen),
                   enabled: SplitRoute.isSplit(context),
                   onTap: () {
                     db.settings.display.planPageFullScreen =
@@ -256,12 +257,8 @@ class ServantListPageState extends State<ServantListPage>
                 PopupMenuItem(
                   child: Text(S.current.help),
                   onTap: () async {
-                    await null;
-                    SimpleCancelOkDialog(
-                      title: Text(S.current.help),
-                      scrollable: true,
-                      content: const Text('Help msg'),
-                    ).showDialog(context);
+                    launch(HttpUrlHelper.projectDocUrl(
+                        'servant_plan.html', Language.isZH));
                   },
                 ),
               ]
@@ -471,43 +468,39 @@ class ServantListPageState extends State<ServantListPage>
     if (!filterData.trait.matchAny(svt.traitsAll)) {
       return false;
     }
-    if (filterData.funcType.options.isNotEmpty ||
-        filterData.buffType.options.isNotEmpty) {
+    if (filterData.effectType.options.isNotEmpty) {
       List<NiceFunction> funcs = [
         if (filterData.effectScope.contain(SvtEffectScope.active))
-          for (final skill in svt.skills) ...skill.functions,
+          for (final skill in svt.skills)
+            ...skill.filteredFunction(includeTrigger: true),
         if (filterData.effectScope.contain(SvtEffectScope.passive))
-          for (final skill in svt.classPassive) ...skill.functions,
+          for (final skill in svt.classPassive)
+            ...skill.filteredFunction(includeTrigger: true),
         if (filterData.effectScope.contain(SvtEffectScope.append))
-          for (final skill in svt.appendPassive) ...skill.skill.functions,
+          for (final skill in svt.appendPassive)
+            ...skill.skill.filteredFunction(includeTrigger: true),
         if (filterData.effectScope.contain(SvtEffectScope.td))
-          for (final td in svt.noblePhantasms) ...td.functions,
+          for (final td in svt.noblePhantasms)
+            ...td.filteredFunction(includeTrigger: true),
       ];
-      if (filterData.funcTarget.options.isNotEmpty) {
+      if (filterData.effectTarget.options.isNotEmpty) {
         funcs.retainWhere((func) {
-          return filterData.funcTarget.matchOne(func.funcTargetType);
-        });
-      }
-      if (filterData.funcType.options.isNotEmpty) {
-        if (!filterData.funcType.matchAny(funcs.map((e) => e.funcType))) {
-          return false;
-        }
-      }
-      if (filterData.buffType.options.isNotEmpty) {
-        if (!filterData.buffType.matchAny(
-            [for (final func in funcs) ...func.buffs.map((e) => e.type)])) {
-          return false;
-        }
-      }
-
-      if (filterData.buffType.options.isNotEmpty) {
-        funcs.retainWhere((func) {
-          final buff = func.buffs.getOrNull(0)?.type;
-          if (buff == null) return false;
-          return filterData.buffType.matchOne(buff);
+          return filterData.effectTarget
+              .matchOne(EffectTargetX.fromFunc(func.funcTargetType));
         });
       }
       if (funcs.isEmpty) return false;
+      if (filterData.effectType.matchAll) {
+        if (!filterData.effectType.options
+            .every((effect) => funcs.any((func) => effect.match(func)))) {
+          return false;
+        }
+      } else {
+        if (!filterData.effectType.options
+            .any((effect) => funcs.any((func) => effect.match(func)))) {
+          return false;
+        }
+      }
     }
     return true;
   }
@@ -928,9 +921,9 @@ class ServantListPageState extends State<ServantListPage>
                   spacing: 6,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    const Padding(
-                      padding: EdgeInsetsDirectional.only(start: 8),
-                      child: Text('Set All'),
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(start: 8),
+                      child: Text(S.current.plan_list_set_all),
                     ),
                     FilterGroup<bool>(
                       combined: true,
@@ -945,7 +938,9 @@ class ServantListPageState extends State<ServantListPage>
                           _changedDress = null;
                         });
                       },
-                      optionBuilder: (s) => Text(s ? 'Target' : 'Current'),
+                      optionBuilder: (s) => Text(s
+                          ? S.current.plan_list_set_all_target
+                          : S.current.plan_list_set_all_current),
                     ),
                     IconButton(
                       onPressed: () {

@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:chaldea/_test_page.dart';
@@ -65,16 +64,22 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               userTile,
               ListTile(
-                leading: const FaIcon(FontAwesomeIcons.server, size: 18),
+                leading: const Icon(Icons.dns),
                 title: Text(S.current.chaldea_server),
                 // subtitle: Text(S.current.chaldea_server_hint),
                 horizontalTitleGap: 0,
                 trailing: DropdownButton<bool>(
                   value: db.settings.proxyServer,
+                  underline: const SizedBox(),
                   items: [
                     DropdownMenuItem(
-                        child: Text(S.current.general_default), value: false),
-                    const DropdownMenuItem(child: Text('CN'), value: true),
+                      child: Text(S.current.chaldea_server_global),
+                      value: false,
+                    ),
+                    DropdownMenuItem(
+                      child: Text(S.current.chaldea_server_cn),
+                      value: true,
+                    ),
                   ],
                   onChanged: (v) {
                     setState(() {
@@ -154,7 +159,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 trailing: db.onSettings((context, _) {
                   final region = db.settings.resolvedPreferredRegions.first;
                   return _wrapArrowTrailing(
-                      Text('${region.toLanguage().name}(${region.toUpper()})'));
+                      Text('${region.toLanguage().name}(${region.localName})'));
                 }),
                 onTap: () {
                   router.push(child: TranslationSetting());

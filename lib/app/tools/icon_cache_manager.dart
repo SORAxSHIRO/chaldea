@@ -14,6 +14,7 @@ import 'package:chaldea/models/models.dart';
 import 'package:chaldea/packages/network.dart';
 import 'package:chaldea/packages/packages.dart';
 import 'package:chaldea/utils/utils.dart';
+import '../api/hosts.dart';
 
 @protected
 class IconCacheManagePage extends StatefulWidget {
@@ -24,8 +25,9 @@ class IconCacheManagePage extends StatefulWidget {
 }
 
 class _IconCacheManagePageState extends State<IconCacheManagePage> {
-  final _loader = AtlasIconLoader();
-  final _limiter = RateLimiter(maxCalls: 5, raiseOnLimit: false);
+  final _loader = AtlasIconLoader.instance;
+  final _limiter = RateLimiter(
+      maxCalls: 20, period: const Duration(seconds: 2), raiseOnLimit: false);
   List<Future<String?>> tasks = [];
   bool canceled = false;
 
@@ -40,7 +42,9 @@ class _IconCacheManagePageState extends State<IconCacheManagePage> {
 
   @override
   Widget build(BuildContext context) {
-    final ratio = (success / tasks.length * 100).toStringAsFixed(1);
+    final ratio =
+        tasks.isEmpty ? '0' : (success / tasks.length * 100).toStringAsFixed(1);
+    final finished = tasks.isNotEmpty && success + failed >= tasks.length;
     return AlertDialog(
       title: Text(S.current.icons),
       content: Text(
@@ -50,17 +54,27 @@ class _IconCacheManagePageState extends State<IconCacheManagePage> {
         style: kMonoStyle,
       ),
       actions: [
-        TextButton(
-          onPressed: () {
-            _limiter.cancelAll();
-            Navigator.of(context).pop();
-          },
-          child: Text(S.current.cancel),
-        ),
-        TextButton(
-          onPressed: tasks.isNotEmpty ? null : _startCaching,
-          child: Text(S.current.download),
-        ),
+        if (!finished)
+          TextButton(
+            onPressed: () {
+              _limiter.cancelAll();
+              Navigator.of(context).pop();
+            },
+            child: Text(S.current.cancel),
+          ),
+        if (!finished)
+          TextButton(
+            onPressed: tasks.isNotEmpty ? null : _startCaching,
+            child: Text(S.current.download),
+          ),
+        if (finished)
+          TextButton(
+            onPressed: () {
+              _limiter.cancelAll();
+              Navigator.of(context).pop();
+            },
+            child: Text(S.current.confirm),
+          ),
       ],
     );
   }
@@ -87,14 +101,22 @@ class _IconCacheManagePageState extends State<IconCacheManagePage> {
         mc.extraAssets.item.female,
         mc.extraAssets.item.male,
       ],
+      for (final func in db.gameData.baseFunctions.values) ...[
+        func.funcPopupIcon,
+        for (final buff in func.buffs) buff.icon
+      ]
     };
+    _loader._failed.removeWhere((key, value) => !value.neverRetry);
     for (final url in urls) {
       if (url == null || url.isEmpty) continue;
-      tasks.add(_loader.download(url, limiter: _limiter).then((res) {
-        print('downloaded $url -> $res');
-        success += 1;
+      tasks.add(_loader.get(url, limiter: _limiter).then((res) {
+        if (res != null) {
+          success += 1;
+        } else {
+          failed += 1;
+        }
         return res;
-      }).catchError((e) {
+      }).catchError((e) async {
         if (e is! RateLimitCancelError) {
           failed += 1;
           print('failed $url: ${escapeDioError(e)}');
@@ -110,12 +132,7 @@ class _IconCacheManagePageState extends State<IconCacheManagePage> {
 
 class AtlasIconLoader extends _CachedLoader<String, String> {
   AtlasIconLoader._();
-  static final AtlasIconLoader _instance = AtlasIconLoader._();
-  factory AtlasIconLoader() => _instance;
-
-  @override
-  final Duration failedExpire = const Duration(minutes: 30);
-
+  static final AtlasIconLoader instance = AtlasIconLoader._();
   final _rateLimiter = RateLimiter(maxCalls: 20);
 
   @override
@@ -124,6 +141,9 @@ class AtlasIconLoader extends _CachedLoader<String, String> {
     if (localPath == null) return null;
     if (await File(localPath).exists()) {
       return localPath;
+    }
+    if (Hosts.cn) {
+      url = Atlas.proxyAssetUrl(url);
     }
     final resp = await (limiter ?? _rateLimiter).limited(() =>
         Dio().get(url, options: Options(responseType: ResponseType.bytes)));
@@ -134,8 +154,14 @@ class AtlasIconLoader extends _CachedLoader<String, String> {
   }
 
   String? _atlasUrlToFp(String url) {
-    if (!url.startsWith(Atlas.assetHost)) return null;
-    String urlPath = url.replaceFirst(Atlas.assetHost, '');
+    String urlPath;
+    if (url.startsWith(Hosts.kAtlasAssetHostGlobal)) {
+      urlPath = url.replaceFirst(Hosts.kAtlasAssetHostGlobal, '');
+    } else if (url.startsWith(Hosts.kAtlasAssetHostCN)) {
+      urlPath = url.replaceFirst(Hosts.kAtlasAssetHostCN, '');
+    } else {
+      return null;
+    }
     return pathlib.joinAll([
       db.paths.atlasIconDir,
       ...urlPath.split('/').where((e) => e.isNotEmpty)
@@ -143,12 +169,21 @@ class AtlasIconLoader extends _CachedLoader<String, String> {
   }
 }
 
+class _FailedDetail {
+  DateTime time;
+  Duration? retryAfter;
+
+  _FailedDetail({required this.time, this.retryAfter});
+
+  bool get neverRetry => retryAfter == null || retryAfter!.inSeconds <= 0;
+}
+
 abstract class _CachedLoader<K, V> {
   final Map<K, Completer<V?>> _completers = {};
   final Map<K, V> _success = {};
-  final Map<K, DateTime> _failed = {};
-  Duration get failedExpire;
-  Future<V?> download(K key);
+  final Map<K, _FailedDetail> _failed = {};
+
+  Future<V?> download(K key, {RateLimiter? limiter});
 
   V? getCached(K key) {
     if (_success.containsKey(key)) return _success[key];
@@ -156,29 +191,46 @@ abstract class _CachedLoader<K, V> {
   }
 
   bool isFailed(K key) {
-    if (_failed[key] != null) {
-      if (_failed[key]!.add(failedExpire).isBefore(DateTime.now())) {
-        _failed.remove(key);
-        return false;
-      } else {
+    final detail = _failed[key];
+    if (detail != null) {
+      if (detail.neverRetry) {
         return true;
       }
+      return detail.time.add(detail.retryAfter!).isAfter(DateTime.now());
     }
     return false;
   }
 
-  Future<V?> get(K key) async {
+  void clearFailed() {
+    _failed.clear();
+  }
+
+  Future<V?> get(K key, {RateLimiter? limiter}) async {
     if (_success.containsKey(key)) return _success[key];
     if (_completers.containsKey(key)) return _completers[key]?.future;
     if (isFailed(key)) return null;
     Completer<V?> _cmpl = Completer();
-    download(key).then<void>((value) {
+    download(key, limiter: limiter).then<void>((value) {
       if (value != null) _success[key] = value;
+      _failed.remove(key);
       _cmpl.complete(value);
     }).catchError((e, s) {
-      logger.e('Got $key failed', e, s);
-      _failed[key] = DateTime.now();
       _cmpl.complete(null);
+      if (e is! DioError || e.response?.statusCode == 403) {
+        _failed[key] ??= _FailedDetail(time: DateTime.now());
+        return;
+      }
+      logger.e('Got $key failed', e, s);
+
+      final detail = _failed[key];
+      if (detail == null) {
+        _failed[key] = _FailedDetail(
+            time: DateTime.now(), retryAfter: const Duration(seconds: 30));
+      } else if (detail.neverRetry) {
+        return;
+      } else {
+        detail.retryAfter = Duration(seconds: detail.retryAfter!.inSeconds * 2);
+      }
     });
     _completers[key] = _cmpl;
     return _cmpl.future;
@@ -218,7 +270,7 @@ class MyCacheImage extends ImageProvider<MyCacheImage> {
   Future<ui.Codec> _loadAsync(MyCacheImage key, DecoderCallback decode) async {
     assert(key == this);
 
-    final localPath = await AtlasIconLoader._instance.get(key.url);
+    final localPath = await AtlasIconLoader.instance.get(key.url);
     if (localPath == null) {
       throw StateError('${key.url} cannot be cached to local');
     }
